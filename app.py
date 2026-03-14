@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 from docxtpl import DocxTemplate
@@ -5,17 +6,18 @@ import io
 import os
 from datetime import datetime
 
-# Cấu hình trang
-st.set_page_config(page_title="Bamboo Gendec System", layout="wide")
+# 1. Cấu hình trang
+st.set_page_config(page_title="Bamboo Airways Gendec System", layout="wide")
 
-# --- XỬ LÝ ĐƯỜNG DẪN FILE ---
+# --- XỬ LÝ ĐƯỜNG DẪN FILE TEMPLATE ---
 base_dir = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_FILE = os.path.join(base_dir, "template.docx")
 
-# CSS fix Dark Mode và làm đẹp UI
+# 2. CSS Custom: Đảm bảo hiển thị tốt trên cả Light/Dark Mode Chrome
 st.markdown("""
     <style>
     .main { background-color: transparent; }
+    /* Ô thông số chính (Metric) */
     [data-testid="stMetric"] {
         background-color: #f0f2f6;
         padding: 15px;
@@ -24,69 +26,78 @@ st.markdown("""
     }
     [data-testid="stMetricLabel"] { color: #31333F !important; }
     [data-testid="stMetricValue"] { color: #1a73e8 !important; font-weight: bold; }
-    .crew-box {
-        background-color: #ffffff;
+    
+    /* Hộp danh sách Crew & JumpSeaters - Ép nền trắng chữ đen */
+    .info-box {
+        background-color: #ffffff !important;
         color: #1a1c21 !important;
-        padding: 15px;
+        padding: 20px;
         border-radius: 10px;
-        border-left: 5px solid #1a73e8;
+        border-left: 6px solid #1a73e8;
         line-height: 1.6;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
     }
-    .crew-box ul li {
+    .info-box ul { margin: 0; padding-left: 20px; }
+    .info-box ul li {
         color: #1a1c21 !important;
-        list-style-type: none;
-        border-bottom: 1px solid #eee;
-        padding: 5px 0;
+        list-style-type: disc;
+        border-bottom: 1px solid #f0f0f0;
+        padding: 8px 0;
     }
-    h3 { color: #4A90E2 !important; }
+    h3 { color: #4A90E2 !important; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("✈️ Bamboo Airways Gendec Generator")
 
+# Kiểm tra file template
 if not os.path.exists(TEMPLATE_FILE):
     st.error(f"⚠️ Không tìm thấy file template tại: {TEMPLATE_FILE}")
 else:
+    # Sidebar cho thao tác cài đặt
     with st.sidebar:
         st.header("Cài đặt")
-        uploaded_excel = st.file_uploader("1. Upload Excel Data", type=["xlsx"])
-        st.info("File template đã được tích hợp sẵn.")
+        uploaded_excel = st.file_uploader("1. Upload file Excel Data", type=["xlsx"])
+        st.info("💡 File 'template.docx' đã được tích hợp sẵn trên hệ thống.")
 
     if uploaded_excel:
-        # Đọc file (header ở dòng 3 -> index 2)
+        # Đọc dữ liệu (Dòng tiêu đề nằm ở hàng 3 -> index 2)
         df = pd.read_excel(uploaded_excel, header=2)
         
-        # Làm sạch tên cột
+        # Làm sạch tên cột (xóa khoảng trắng thừa)
         df.columns = [str(c).strip() for c in df.columns]
 
-        # --- DYNAMIC COLUMN DETECTION ---
-        # Tìm cột chứa từ khóa "JumpSeaters" và "Crew"
+        # --- DÒ CỘT TỰ ĐỘNG (Dynamic Detection) ---
         js_col = None
         crew_col = None
-        
         for col in df.columns:
             if "JumpSeaters" in col:
                 js_col = col
-            if "Crew" in col and "Crew #" not in col: # Tránh nhầm với cột Crew #
+            if "Crew" in col and "Crew #" not in col:
                 crew_col = col
 
-        # Ô nhập số hiệu chuyến bay
-        search_flt = st.text_input("🔍 Nhập số hiệu chuyến bay (ví dụ: 101, 102, 208...)", "")
+        # Ô tìm kiếm chuyến bay
+        search_flt = st.text_input("🔍 Nhập số hiệu chuyến bay (ví dụ: 102, 208, 147...)", "")
 
         if search_flt:
-            # Tìm dòng chứa chuyến bay
+            # Tìm dòng chứa chuyến bay (convert FLT sang string để tìm kiếm)
             target_row = df[df['FLT'].astype(str).str.contains(search_flt)]
 
             if not target_row.empty:
                 start_idx = target_row.index[0]
 
-                # --- TRÍCH XUẤT DỮ LIỆU CƠ BẢN ---
-                flt_val = str(df.loc[start_idx, 'FLT'])
+                # --- XỬ LÝ DỮ LIỆU CƠ BẢN (FIX LỖI .0) ---
+                raw_flt = df.loc[start_idx, 'FLT']
+                if pd.api.types.is_number(raw_flt):
+                    flt_val = str(int(raw_flt)) # Biến 208.0 thành 208
+                else:
+                    flt_val = str(raw_flt).replace('.0', '')
+
                 reg_val = str(df.loc[start_idx, 'REG'])
                 dep_val = str(df.loc[start_idx, 'DEP'])
                 arr_val = str(df.loc[start_idx, 'ARR'])
 
-                # Format DATE (DDMMMYY)
+                # Format DATE (DDMMMYY - ví dụ: 14MAR26)
                 raw_date = df.loc[start_idx, 'DATE']
                 try:
                     if isinstance(raw_date, datetime):
@@ -95,80 +106,87 @@ else:
                         date_obj = pd.to_datetime(raw_date, dayfirst=True)
                         date_val = date_obj.strftime('%d%b%y').upper()
                 except:
-                    date_val = str(raw_date)
+                    date_val = str(raw_date).replace('.0', '')
 
-                # --- QUÉT CREW VÀ JUMPSEATERS ---
+                # --- QUÉT CREW VÀ JUMPSEATERS THEO KHỐI ---
                 crew_list = []
                 jump_seaters_list = []
                 
                 for i in range(start_idx, len(df)):
-                    # Dừng lại nếu gặp chuyến bay tiếp theo
+                    # Dừng lại nếu chạm tới chuyến bay tiếp theo (cột FLT có dữ liệu mới)
                     if i > start_idx and pd.notna(df.loc[i, 'FLT']):
                         break
                     
-                    # Lấy Crew (Dò theo tên cột đã detect)
+                    # Lấy Crew từ cột đã detect
                     if crew_col and pd.notna(df.loc[i, crew_col]):
-                        val = str(df.loc[i, crew_col]).strip()
-                        if val.lower() != "crew": # Tránh lấy trúng header nếu có
-                            crew_list.append(val)
+                        c_val = str(df.loc[i, crew_col]).strip()
+                        if c_val.lower() not in ["crew", "name"]:
+                            crew_list.append(c_val)
                     
-                    # Lấy JumpSeaters (Dò theo tên cột đã detect)
+                    # Lấy JumpSeaters từ cột đã detect
                     if js_col and pd.notna(df.loc[i, js_col]):
-                        val = str(df.loc[i, js_col]).strip()
-                        # Loại bỏ chữ "name" nếu nó nằm ở hàng ngay dưới tiêu đề
-                        if val.lower() not in ["name", "jumpseaters"]:
-                            jump_seaters_list.append(val)
+                        j_val = str(df.loc[i, js_col]).strip()
+                        if j_val.lower() not in ["jumpseaters", "name"]:
+                            jump_seaters_list.append(j_val)
 
-                # --- UI PREVIEW ---
+                # --- HIỂN THỊ GIAO DIỆN XEM TRƯỚC (PREVIEW) ---
                 st.markdown("---")
-                st.subheader(f"📊 Preview: Chuyến bay QH{flt_val}")
+                st.subheader(f"📊 Thông tin chuyến bay QH{flt_val}")
 
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("DATE", date_val)
-                c2.metric("REG", reg_val)
-                c3.metric("DEP", dep_val)
-                c4.metric("ARR", arr_val)
+                # Hàng metric chính
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("DATE", date_val)
+                m2.metric("REGISTRATION", reg_val)
+                m3.metric("FROM", dep_val)
+                m4.metric("TO", arr_val)
 
                 st.write("")
                 col_left, col_right = st.columns(2)
 
                 with col_left:
-                    st.markdown("### 👨‍✈️ Crew List")
+                    st.markdown("### 👨‍✈️ Danh sách Crew")
                     if crew_list:
-                        crew_html = "".join([f"<li>{c}</li>" for c in crew_list])
-                        st.markdown(f'<div class="crew-box"><ul>{crew_html}</ul></div>', unsafe_allow_html=True)
+                        li_items = "".join([f"<li>{c}</li>" for c in crew_list])
+                        st.markdown(f'<div class="info-box"><ul>{li_items}</ul></div>', unsafe_allow_html=True)
                     else:
-                        st.warning("Không tìm thấy dữ liệu Crew.")
+                        st.warning("⚠️ Không tìm thấy dữ liệu Crew.")
 
                 with col_right:
                     st.markdown("### 💺 JumpSeaters")
                     if jump_seaters_list:
-                        js_html = "".join([f"<li>{j}</li>" for j in jump_seaters_list])
-                        st.markdown(f'<div class="crew-box" style="border-left-color: #f4b400;"><ul>{js_html}</ul></div>', unsafe_allow_html=True)
+                        js_items = "".join([f"<li>{j}</li>" for j in jump_seaters_list])
+                        st.markdown(f'<div class="info-box" style="border-left-color: #f4b400;"><ul>{js_items}</ul></div>', unsafe_allow_html=True)
                     else:
-                        st.info("Không có JumpSeaters.")
+                        st.info("ℹ️ Chuyến bay này không có JumpSeaters.")
 
-                # --- GENERATE WORD ---
+                # --- NÚT XUẤT FILE WORD ---
+                st.write("")
                 st.write("")
                 if st.button("🚀 XUẤT FILE WORD NGAY", use_container_width=True):
-                    doc = DocxTemplate(TEMPLATE_FILE)
-                    context = {
-                        'FLT': flt_val, 'REG': reg_val, 'DEP': dep_val,
-                        'ARR': arr_val, 'DATE': date_val,
-                        'Crew': "\n".join(crew_list),
-                        'JumpSeaters': "\n".join(jump_seaters_list)
-                    }
-                    doc.render(context)
-                    bio = io.BytesIO()
-                    doc.save(bio)
-                    bio.seek(0)
-
-                    st.download_button(
-                        label=f"📥 Tải xuống: GD_QH{flt_val}.docx",
-                        data=bio,
-                        file_name=f"GD_QH{flt_val}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True
-                    )
+                    try:
+                        doc = DocxTemplate(TEMPLATE_FILE)
+                        context = {
+                            'FLT': flt_val, 'REG': reg_val, 'DEP': dep_val,
+                            'ARR': arr_val, 'DATE': date_val,
+                            'Crew': "\n".join(crew_list),
+                            'JumpSeaters': "\n".join(jump_seaters_list)
+                        }
+                        doc.render(context)
+                        
+                        # Lưu vào buffer để download
+                        bio = io.BytesIO()
+                        doc.save(bio)
+                        bio.seek(0)
+                        
+                        st.download_button(
+                            label=f"📥 Tải xuống file: GD_QH{flt_val}.docx",
+                            data=bio,
+                            file_name=f"GD_QH{flt_val}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True
+                        )
+                        st.success("Tạo file thành công! Bấm nút phía trên để tải về.")
+                    except Exception as e:
+                        st.error(f"Lỗi khi render file Word: {e}")
             else:
-                st.warning(f"❌ Không tìm thấy chuyến bay: {search_flt}")
+                st.warning(f"❌ Không tìm thấy chuyến bay số: {search_flt}")

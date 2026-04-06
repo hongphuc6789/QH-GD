@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from docxtpl import DocxTemplate
@@ -13,11 +12,10 @@ st.set_page_config(page_title="Bamboo Airways Gendec System", layout="wide")
 base_dir = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_FILE = os.path.join(base_dir, "template.docx")
 
-# 2. CSS Custom: Đảm bảo hiển thị tốt trên cả Light/Dark Mode Chrome
+# 2. CSS Custom
 st.markdown("""
     <style>
     .main { background-color: transparent; }
-    /* Ô thông số chính (Metric) */
     [data-testid="stMetric"] {
         background-color: #f0f2f6;
         padding: 15px;
@@ -26,8 +24,6 @@ st.markdown("""
     }
     [data-testid="stMetricLabel"] { color: #31333F !important; }
     [data-testid="stMetricValue"] { color: #1a73e8 !important; font-weight: bold; }
-    
-    /* Hộp danh sách Crew & JumpSeaters - Ép nền trắng chữ đen */
     .info-box {
         background-color: #ffffff !important;
         color: #1a1c21 !important;
@@ -50,90 +46,83 @@ st.markdown("""
 
 st.title("✈️ Bamboo Airways Gendec Generator")
 
-# Kiểm tra file template
 if not os.path.exists(TEMPLATE_FILE):
     st.error(f"⚠️ Không tìm thấy file template tại: {TEMPLATE_FILE}")
 else:
-    # Sidebar cho thao tác cài đặt
     with st.sidebar:
         st.header("Cài đặt")
         uploaded_excel = st.file_uploader("1. Upload file Excel Data", type=["xlsx"])
         st.info("💡 File 'template.docx' đã được tích hợp sẵn trên hệ thống.")
 
     if uploaded_excel:
-        # Đọc dữ liệu (Dòng tiêu đề nằm ở hàng 3 -> index 2)
-        df = pd.read_excel(uploaded_excel, header=2)
+        # --- SỬA LỖI TẠI ĐÂY ---
+        # Đọc toàn bộ dưới dạng string để tránh Pandas tự parse ngày tháng sai định dạng
+        df = pd.read_excel(uploaded_excel, header=2, dtype=str)
         
-        # Làm sạch tên cột (xóa khoảng trắng thừa)
         df.columns = [str(c).strip() for c in df.columns]
 
-        # --- DÒ CỘT TỰ ĐỘNG (Dynamic Detection) ---
         js_col = None
         crew_col = None
         for col in df.columns:
-            if "JumpSeaters" in col:
-                js_col = col
-            if "Crew" in col and "Crew #" not in col:
-                crew_col = col
+            if "JumpSeaters" in col: js_col = col
+            if "Crew" in col and "Crew #" not in col: crew_col = col
 
-        # Ô tìm kiếm chuyến bay
         search_flt = st.text_input("🔍 Nhập số hiệu chuyến bay (ví dụ: 102, 208, 147...)", "")
 
         if search_flt:
-            # Tìm dòng chứa chuyến bay (convert FLT sang string để tìm kiếm)
             target_row = df[df['FLT'].astype(str).str.contains(search_flt)]
 
             if not target_row.empty:
                 start_idx = target_row.index[0]
 
-                # --- XỬ LÝ DỮ LIỆU CƠ BẢN (FIX LỖI .0) ---
+                # Clean FLT
                 raw_flt = df.loc[start_idx, 'FLT']
-                if pd.api.types.is_number(raw_flt):
-                    flt_val = str(int(raw_flt)) # Biến 208.0 thành 208
-                else:
-                    flt_val = str(raw_flt).replace('.0', '')
+                flt_val = str(raw_flt).split('.')[0] if '.' in str(raw_flt) else str(raw_flt)
 
                 reg_val = str(df.loc[start_idx, 'REG'])
                 dep_val = str(df.loc[start_idx, 'DEP'])
                 arr_val = str(df.loc[start_idx, 'ARR'])
 
-                # Format DATE (DDMMMYY - ví dụ: 14MAR26)
+                # --- XỬ LÝ DATE CHUẨN XÁC ---
                 raw_date = df.loc[start_idx, 'DATE']
                 try:
-                    if isinstance(raw_date, datetime):
-                        date_val = raw_date.strftime('%d%b%y').upper()
+                    # Vì đã ép kiểu string ở trên, ta parse với dayfirst=True
+                    # Xử lý trường hợp chuỗi có giờ đi kèm (ví dụ: "2026-05-04 00:00:00")
+                    clean_date_str = str(raw_date).split(' ')[0]
+                    
+                    # Ưu tiên parse Ngày trước Tháng
+                    date_obj = pd.to_datetime(clean_date_str, dayfirst=True, errors='coerce')
+                    
+                    if pd.isna(date_obj):
+                        # Nếu vẫn lỗi (do file format lạ), giữ nguyên text
+                        date_val = clean_date_str
                     else:
-                        date_obj = pd.to_datetime(raw_date, dayfirst=True)
-                        date_val = date_obj.strftime('%d%b%y').upper()
+                        date_val = date_obj.strftime('%d%b%y').upper() # Kết quả: 05APR26
                 except:
                     date_val = str(raw_date).replace('.0', '')
 
-                # --- QUÉT CREW VÀ JUMPSEATERS THEO KHỐI ---
+                # --- QUÉT CREW VÀ JUMPSEATERS ---
                 crew_list = []
                 jump_seaters_list = []
                 
                 for i in range(start_idx, len(df)):
-                    # Dừng lại nếu chạm tới chuyến bay tiếp theo (cột FLT có dữ liệu mới)
                     if i > start_idx and pd.notna(df.loc[i, 'FLT']):
                         break
                     
-                    # Lấy Crew từ cột đã detect
                     if crew_col and pd.notna(df.loc[i, crew_col]):
                         c_val = str(df.loc[i, crew_col]).strip()
-                        if c_val.lower() not in ["crew", "name"]:
+                        if c_val.lower() not in ["crew", "name", "nan"]:
                             crew_list.append(c_val)
                     
-                    # Lấy JumpSeaters từ cột đã detect
                     if js_col and pd.notna(df.loc[i, js_col]):
                         j_val = str(df.loc[i, js_col]).strip()
-                        if j_val.lower() not in ["jumpseaters", "name"]:
+                        if j_val.lower() not in ["jumpseaters", "name", "nan"]:
                             jump_seaters_list.append(j_val)
 
-                # --- HIỂN THỊ GIAO DIỆN XEM TRƯỚC (PREVIEW) ---
+                # --- GIAO DIỆN PREVIEW ---
                 st.markdown("---")
                 st.subheader(f"📊 Thông tin chuyến bay QH{flt_val}")
 
-                # Hàng metric chính
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("DATE", date_val)
                 m2.metric("REGISTRATION", reg_val)
@@ -159,8 +148,7 @@ else:
                     else:
                         st.info("ℹ️ Chuyến bay này không có JumpSeaters.")
 
-                # --- NÚT XUẤT FILE WORD ---
-                st.write("")
+                # --- NÚT XUẤT FILE ---
                 st.write("")
                 if st.button("🚀 XUẤT FILE WORD NGAY", use_container_width=True):
                     try:
@@ -173,7 +161,6 @@ else:
                         }
                         doc.render(context)
                         
-                        # Lưu vào buffer để download
                         bio = io.BytesIO()
                         doc.save(bio)
                         bio.seek(0)
@@ -185,7 +172,7 @@ else:
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                             use_container_width=True
                         )
-                        st.success("Tạo file thành công! Bấm nút phía trên để tải về.")
+                        st.success("Tạo file thành công!")
                     except Exception as e:
                         st.error(f"Lỗi khi render file Word: {e}")
             else:
